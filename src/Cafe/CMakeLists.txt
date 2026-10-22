@@ -469,6 +469,8 @@ add_library(CemuCafe
   OS/libs/nsyshid/Infinity.h
   OS/libs/nsyshid/Skylander.cpp
   OS/libs/nsyshid/Skylander.h
+  OS/libs/nsyshid/SkylanderPortalIPC.cpp
+  OS/libs/nsyshid/SkylanderPortalIPC.h
   OS/libs/nsyskbd/nsyskbd.cpp
   OS/libs/nsyskbd/nsyskbd.h
   OS/libs/nsysnet/nsysnet.cpp

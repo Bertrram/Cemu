@@ -7,6 +7,7 @@
 #include "config/ActiveSettings.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Alarm.h"
 #include "input/InputManager.h"
+#include "Cafe/OS/libs/nsyshid/SkylanderPortalIPC.h"
 
 #ifdef PUBLIC_RELASE
 #define vpadbreak() 
@@ -263,7 +264,7 @@ namespace vpad
 			PPCCore_switchToScheduler();
 		}
 
-		if (!g_inputConfigWindowHasFocus)
+		if (!g_inputConfigWindowHasFocus && !nsyshid::SkylanderPortalIPC::IsInputHushed())
 		{
 			if (channel <= 1 && vpadDelayEnabled)
 			{

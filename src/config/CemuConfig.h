@@ -525,6 +525,13 @@ struct CemuConfig
 		ConfigValue<bool> emulate_dimensions_toypad{false};
 	}emulated_usb_devices{};
 
+	// skylanders portal ipc server
+	struct
+	{
+		ConfigValue<bool> enabled{false};
+		ConfigValue<uint16> port{28014};
+	}skylanders_ipc{};
+
 	static int AudioChannelsToNChannels(AudioChannels kStereo)
 	{
 		switch (kStereo)

@@ -348,6 +348,11 @@ void CemuConfig::Load(XMLConfigParser& parser)
 	emulated_usb_devices.emulate_skylander_portal = usbdevices.get("EmulateSkylanderPortal", emulated_usb_devices.emulate_skylander_portal);
 	emulated_usb_devices.emulate_infinity_base = usbdevices.get("EmulateInfinityBase", emulated_usb_devices.emulate_infinity_base);
 	emulated_usb_devices.emulate_dimensions_toypad = usbdevices.get("EmulateDimensionsToypad", emulated_usb_devices.emulate_dimensions_toypad);
+
+	// skylanders portal ipc server
+	auto skylandersIpc = parser.get("SkylandersIPC");
+	skylanders_ipc.enabled = skylandersIpc.get("enabled", skylanders_ipc.enabled);
+	skylanders_ipc.port = skylandersIpc.get("port", 28014);
 }
 
 void CemuConfig::Save(XMLConfigParser& parser)
@@ -549,6 +554,11 @@ void CemuConfig::Save(XMLConfigParser& parser)
 	usbdevices.set("EmulateSkylanderPortal", emulated_usb_devices.emulate_skylander_portal.GetValue());
 	usbdevices.set("EmulateInfinityBase", emulated_usb_devices.emulate_infinity_base.GetValue());
 	usbdevices.set("EmulateDimensionsToypad", emulated_usb_devices.emulate_dimensions_toypad.GetValue());
+
+	// skylanders portal ipc server
+	auto skylandersIpc = config.set("SkylandersIPC");
+	skylandersIpc.set("enabled", skylanders_ipc.enabled.GetValue());
+	skylandersIpc.set("port", skylanders_ipc.port.GetValue());
 }
 
 GameEntry* CemuConfig::GetGameEntryByTitleId(uint64 titleId)

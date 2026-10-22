@@ -61,6 +61,7 @@
 #include "Cafe/OS/libs/nn_ccr/nn_ccr.h"
 #include "Cafe/OS/libs/nn_temp/nn_temp.h"
 #include "Cafe/OS/libs/nn_save/nn_save.h"
+#include "Cafe/OS/libs/nsyshid/SkylanderPortalIPC.h"
 
 // HW interfaces
 #include "Cafe/HW/SI/si.h"
@@ -379,6 +380,8 @@ void cemu_initForGame()
 	PPCTimer_start();
 	// this must happen after the RPX/RPL files are mapped to memory (coreinit sets up heaps so that they don't overwrite RPX/RPL data)
 	osLib_load();
+	// the emulated Skylanders portal has been attached by nsyshid
+	nsyshid::SkylanderPortalIPC::Start();
 	// link all modules
 	uint32 linkTimeStart = GetTickCount();
 	RPLLoader_UpdateDependencies();
@@ -987,6 +990,7 @@ namespace CafeSystem
 	{
 		if(!sSystemRunning)
 			return;
+        nsyshid::SkylanderPortalIPC::Stop();
         coreinit::OSSchedulerEnd();
         Latte_Stop();
         // reset Cafe OS userspace modules
