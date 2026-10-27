@@ -226,6 +226,14 @@ namespace nsyshid
 			{{231, 0x0000}, "Piggy Bank"},
 			{{232, 0x0000}, "Rocket Ram"},
 			{{233, 0x0000}, "Tiki Speaky"},
+			// Imaginators' Mystery Chests, from github.com/Texthead1/Skylander-IDs,
+			// README, "Toys For Bob Items/Traps", lines 285 to 289 at commit 04bf6b0
+			// (read 27 October 2026)
+			{{235, 0x5001}, "Bronze Mystery Chest"},
+			{{235, 0x5002}, "Silver Mystery Chest"},
+			{{235, 0x5003}, "Gold Mystery Chest"},
+			{{235, 0x5017}, "Cursed Tiki Temple Mystery Chest"},
+			{{235, 0x5019}, "Lost Imaginite Mines Mystery Chest"},
 			{{300, 0x0000}, "Dragon’s Peak"},
 			{{301, 0x0000}, "Empire of Ice"},
 			{{302, 0x0000}, "Pirate Seas"},
@@ -235,6 +243,10 @@ namespace nsyshid
 			{{306, 0x0000}, "Nightmare Express"},
 			{{307, 0x0000}, "Sunscraper Spire"},
 			{{308, 0x0000}, "Midnight Museum"},
+			// Imaginators' level pieces, from the same list, "Toys For Bob
+			// Expansions", lines 305 and 306
+			{{310, 0x5000}, "Gryphon Park Observatory"},
+			{{311, 0x5000}, "Enchanted Elven Forest"},
 			{{404, 0x0000}, "Legendary Bash"},
 			{{416, 0x0000}, "Legendary Spyro"},
 			{{419, 0x0000}, "Legendary Trigger Happy"},
