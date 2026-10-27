@@ -20,10 +20,13 @@ std::atomic_int32_t g_padVolume = 0;
 
 // Trap Team plays its trap and villain sounds on the Traptanium Portal's own
 // speaker. It sends them as 64 byte interrupt writes, each 32 samples of
-// signed 16 bit little endian mono PCM at 8000 Hz, one every 4 ms in real
-// time (Cemu pull request 1478, commit 4f4412b, nsyshid/Skylander.cpp
-// SkylanderPortalDevice::Write; Dolphin pull request 11644,
-// AudioCommon/Mixer.cpp lines 292 to 306 at 3eb30c7; read 27 October 2026).
+// signed 16 bit little endian mono PCM at 8000 Hz (Cemu pull request 1478,
+// commit 4f4412b, nsyshid/Skylander.cpp SkylanderPortalDevice::Write;
+// Dolphin pull request 11644, AudioCommon/Mixer.cpp lines 292 to 306 at
+// 3eb30c7; read 27 October 2026). A real portal takes one every 4 ms; how
+// fast the game sends them to an emulated portal, which takes each at once,
+// is not known yet, and a sound sent faster than it plays loses its start
+// once the queue below is full.
 // They are kept here and mixed into the TV's sound, as Dolphin mixes them
 // into its own output, so they play on Cemu's output at its volume with no
 // device or setting of their own. Upstream Cemu opens a device for them

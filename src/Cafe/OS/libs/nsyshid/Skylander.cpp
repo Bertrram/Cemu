@@ -572,9 +572,13 @@ namespace nsyshid
 	Device::WriteResult SkylanderPortalDevice::Write(WriteMessage* message)
 	{
 		// What Trap Team plays on the Traptanium Portal's speaker: 32 samples
-		// of signed 16 bit little endian mono PCM at 8000 Hz in each 64 byte
-		// write (Cemu pull request 1478, commit 4f4412b; Dolphin pull request
-		// 11644). They are mixed into the TV's sound (audio/IAudioAPI.cpp)
+		// of 16 bit mono PCM at 8000 Hz in each 64 byte write (Cemu pull
+		// request 1478, commit 4f4412b; Dolphin pull request 11644). Both
+		// emulators' comments call the samples unsigned, but both read them as
+		// signed little endian, as this does (upstream Cemu's Skylander.cpp
+		// line 576; Dolphin's AudioCommon/Mixer.cpp lines 301 to 303 at
+		// 3eb30c7, read 27 October 2026). They are mixed into the TV's sound
+		// (audio/IAudioAPI.cpp)
 		if (message->length == 64)
 		{
 			std::array<sint16, 32> samples;
