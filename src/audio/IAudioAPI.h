@@ -93,3 +93,9 @@ extern AudioAPIPtr g_tvAudio;
 
 extern AudioAPIPtr g_padAudio;
 extern std::atomic_int32_t g_padVolume;
+
+// The speaker of the emulated Traptanium Portal: nsyshid/Skylander.cpp hands
+// it what the game plays there, and the TV's sound is mixed with it
+void PortalSpeaker_PushSamples(const sint16* samples, size_t count);
+void PortalSpeaker_MixInto(sint16* interleaved, size_t frames, uint32 channels, uint32 sampleRate);
+void PortalSpeaker_Clear();

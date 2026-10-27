@@ -9,11 +9,87 @@
 #if HAS_CUBEB
 #include "CubebAPI.h"
 #endif
+#include <deque>
+#include <mutex>
 
 std::shared_mutex g_audioMutex;
 AudioAPIPtr g_tvAudio;
 AudioAPIPtr g_padAudio;
 std::atomic_int32_t g_padVolume = 0;
+
+// Trap Team plays its trap and villain sounds on the Traptanium Portal's own
+// speaker. It sends them as 64 byte interrupt writes, each 32 samples of
+// signed 16 bit little endian mono PCM at 8000 Hz, one every 4 ms in real
+// time (Cemu pull request 1478, commit 4f4412b, nsyshid/Skylander.cpp
+// SkylanderPortalDevice::Write; Dolphin pull request 11644,
+// AudioCommon/Mixer.cpp lines 292 to 306 at 3eb30c7; read 27 October 2026).
+// They are kept here and mixed into the TV's sound, as Dolphin mixes them
+// into its own output, so they play on Cemu's output at its volume with no
+// device or setting of their own. Upstream Cemu opens a device for them
+// instead, which plays nothing until its settings name one and is reported
+// glitchy on Windows 11 (Cemu issue 1705).
+static std::mutex s_portalMutex;
+static std::deque<sint16> s_portalSamples;
+// The last sample mixed in, which the next one ramps from
+static sint16 s_portalLastSample = 0;
+// Half a second: a game that writes faster than the speaker plays loses its
+// oldest samples rather than falling further and further behind
+constexpr size_t kPortalMaxSamples = 4000;
+constexpr uint32 kPortalSampleRate = 8000;
+
+void PortalSpeaker_PushSamples(const sint16* samples, size_t count)
+{
+	std::lock_guard lock(s_portalMutex);
+	s_portalSamples.insert(s_portalSamples.end(), samples, samples + count);
+	while (s_portalSamples.size() > kPortalMaxSamples)
+		s_portalSamples.pop_front();
+}
+
+void PortalSpeaker_MixInto(sint16* interleaved, size_t frames, uint32 channels, uint32 sampleRate)
+{
+	if (channels == 0 || sampleRate % kPortalSampleRate != 0)
+		return;
+	const size_t step = sampleRate / kPortalSampleRate;
+	const size_t wanted = frames / step;
+	std::vector<sint16> taken;
+	sint16 previous;
+	{
+		std::lock_guard lock(s_portalMutex);
+		// Nothing was ever written, or all of it has played out: the TV's
+		// sound is left exactly as it is
+		if (s_portalSamples.empty() && s_portalLastSample == 0)
+			return;
+		const size_t count = std::min(wanted, s_portalSamples.size());
+		taken.assign(s_portalSamples.begin(), s_portalSamples.begin() + count);
+		s_portalSamples.erase(s_portalSamples.begin(), s_portalSamples.begin() + count);
+		previous = s_portalLastSample;
+	}
+	// Each speaker sample spans `step` frames of the TV's sound, ramping from
+	// the one before it so the sound isn't stepped, and a gap ramps down to
+	// silence. It goes on the front left and right, or the one channel there is
+	const uint32 mixedChannels = std::min<uint32>(channels, 2);
+	for (size_t i = 0; i < wanted; i++)
+	{
+		const sint16 next = i < taken.size() ? taken[i] : 0;
+		for (size_t j = 0; j < step; j++)
+		{
+			const sint32 value = previous + (sint32)(next - previous) * (sint32)(j + 1) / (sint32)step;
+			sint16* frame = interleaved + (i * step + j) * channels;
+			for (uint32 c = 0; c < mixedChannels; c++)
+				frame[c] = (sint16)std::clamp<sint32>(frame[c] + value, -32768, 32767);
+		}
+		previous = next;
+	}
+	std::lock_guard lock(s_portalMutex);
+	s_portalLastSample = previous;
+}
+
+void PortalSpeaker_Clear()
+{
+	std::lock_guard lock(s_portalMutex);
+	s_portalSamples.clear();
+	s_portalLastSample = 0;
+}
 
 uint32 IAudioAPI::s_audioDelay = 2;
 std::array<bool, IAudioAPI::AudioAPIEnd> IAudioAPI::s_availableApis{};

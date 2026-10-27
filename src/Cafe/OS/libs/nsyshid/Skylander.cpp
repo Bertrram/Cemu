@@ -6,6 +6,7 @@
 #include "Backend.h"
 
 #include "Common/FileStream.h"
+#include "audio/IAudioAPI.h"
 
 namespace nsyshid
 {
@@ -570,6 +571,17 @@ namespace nsyshid
 
 	Device::WriteResult SkylanderPortalDevice::Write(WriteMessage* message)
 	{
+		// What Trap Team plays on the Traptanium Portal's speaker: 32 samples
+		// of signed 16 bit little endian mono PCM at 8000 Hz in each 64 byte
+		// write (Cemu pull request 1478, commit 4f4412b; Dolphin pull request
+		// 11644). They are mixed into the TV's sound (audio/IAudioAPI.cpp)
+		if (message->length == 64)
+		{
+			std::array<sint16, 32> samples;
+			for (size_t i = 0; i < samples.size(); i++)
+				samples[i] = static_cast<sint16>(message->data[i * 2] | (message->data[i * 2 + 1] << 8));
+			PortalSpeaker_PushSamples(samples.data(), samples.size());
+		}
 		message->bytesWritten = message->length;
 		return Device::WriteResult::Success;
 	}
