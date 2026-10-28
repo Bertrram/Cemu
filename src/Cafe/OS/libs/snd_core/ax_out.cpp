@@ -184,7 +184,10 @@ namespace snd_core
 		if (tempAudioBlockCounter == AX_FRAMES_PER_GROUP)
 		{
 			if(g_tvAudio)
+			{
+				PortalSpeaker_MixInto(tempTVChannelData, AX_SAMPLES_PER_3MS_48KHZ * AX_FRAMES_PER_GROUP, channels, 48000);
 				g_tvAudio->FeedBlock(tempTVChannelData);
+			}
 
 			tempAudioBlockCounter = 0;
 		}
@@ -442,6 +445,7 @@ namespace snd_core
 			g_padAudio->Stop();
 			g_padAudio.reset();
 		}
+		PortalSpeaker_Clear();
 	}
 
 	void AXOut_updateDevicePlayState(bool isPlaying)

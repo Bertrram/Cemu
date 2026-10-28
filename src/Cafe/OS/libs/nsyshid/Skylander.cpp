@@ -6,6 +6,7 @@
 #include "Backend.h"
 
 #include "Common/FileStream.h"
+#include "audio/IAudioAPI.h"
 
 namespace nsyshid
 {
@@ -226,6 +227,14 @@ namespace nsyshid
 			{{231, 0x0000}, "Piggy Bank"},
 			{{232, 0x0000}, "Rocket Ram"},
 			{{233, 0x0000}, "Tiki Speaky"},
+			// Imaginators' Mystery Chests, from github.com/Texthead1/Skylander-IDs,
+			// README, "Toys For Bob Items/Traps", lines 285 to 289 at commit 04bf6b0
+			// (read 27 October 2026)
+			{{235, 0x5001}, "Bronze Mystery Chest"},
+			{{235, 0x5002}, "Silver Mystery Chest"},
+			{{235, 0x5003}, "Gold Mystery Chest"},
+			{{235, 0x5017}, "Cursed Tiki Temple Mystery Chest"},
+			{{235, 0x5019}, "Lost Imaginite Mines Mystery Chest"},
 			{{300, 0x0000}, "Dragon’s Peak"},
 			{{301, 0x0000}, "Empire of Ice"},
 			{{302, 0x0000}, "Pirate Seas"},
@@ -235,6 +244,10 @@ namespace nsyshid
 			{{306, 0x0000}, "Nightmare Express"},
 			{{307, 0x0000}, "Sunscraper Spire"},
 			{{308, 0x0000}, "Midnight Museum"},
+			// Imaginators' level pieces, from the same list, "Toys For Bob
+			// Expansions", lines 305 and 306
+			{{310, 0x5000}, "Gryphon Park Observatory"},
+			{{311, 0x5000}, "Enchanted Elven Forest"},
 			{{404, 0x0000}, "Legendary Bash"},
 			{{416, 0x0000}, "Legendary Spyro"},
 			{{419, 0x0000}, "Legendary Trigger Happy"},
@@ -558,6 +571,21 @@ namespace nsyshid
 
 	Device::WriteResult SkylanderPortalDevice::Write(WriteMessage* message)
 	{
+		// What Trap Team plays on the Traptanium Portal's speaker: 32 samples
+		// of 16 bit mono PCM at 8000 Hz in each 64 byte write (Cemu pull
+		// request 1478, commit 4f4412b; Dolphin pull request 11644). Both
+		// emulators' comments call the samples unsigned, but both read them as
+		// signed little endian, as this does (upstream Cemu's Skylander.cpp
+		// line 576; Dolphin's AudioCommon/Mixer.cpp lines 301 to 303 at
+		// 3eb30c7, read 27 October 2026). They are mixed into the TV's sound
+		// (audio/IAudioAPI.cpp)
+		if (message->length == 64)
+		{
+			std::array<sint16, 32> samples;
+			for (size_t i = 0; i < samples.size(); i++)
+				samples[i] = static_cast<sint16>(message->data[i * 2] | (message->data[i * 2 + 1] << 8));
+			PortalSpeaker_PushSamples(samples.data(), samples.size());
+		}
 		message->bytesWritten = message->length;
 		return Device::WriteResult::Success;
 	}
@@ -793,7 +821,7 @@ namespace nsyshid
 		}
 	}
 
-	uint8 SkylanderUSB::LoadSkylander(uint8* buf, std::unique_ptr<FileStream> file)
+	uint8 SkylanderUSB::LoadSkylander(uint8* buf, std::unique_ptr<FileStream> file, sint32 requestedSlot)
 	{
 		std::lock_guard lock(m_skyMutex);
 
@@ -805,20 +833,28 @@ namespace nsyshid
 		}
 		uint8 foundSlot = 0xFF;
 
-		// mimics spot retaining on the portal
-		for (auto i = 0; i < 16; i++)
+		if (requestedSlot >= 0 && requestedSlot < MAX_SKYLANDERS)
 		{
-			if ((m_skylanders[i].status & 1) == 0)
+			if ((m_skylanders[requestedSlot].status & 1) == 0)
+				foundSlot = (uint8)requestedSlot;
+		}
+		else
+		{
+			// mimics spot retaining on the portal
+			for (auto i = 0; i < 16; i++)
 			{
-				if (m_skylanders[i].lastId == skySerial)
+				if ((m_skylanders[i].status & 1) == 0)
 				{
-					foundSlot = i;
-					break;
-				}
+					if (m_skylanders[i].lastId == skySerial)
+					{
+						foundSlot = i;
+						break;
+					}
 
-				if (i < foundSlot)
-				{
-					foundSlot = i;
+					if (i < foundSlot)
+					{
+						foundSlot = i;
+					}
 				}
 			}
 		}
@@ -852,6 +888,19 @@ namespace nsyshid
 		}
 
 		return false;
+	}
+
+	bool SkylanderUSB::GetLoadedSkylander(uint8 skyNum, uint16& skyId, uint16& skyVar)
+	{
+		std::lock_guard lock(m_skyMutex);
+		const auto& skylander = m_skylanders[skyNum];
+
+		if ((skylander.status & 1) == 0)
+			return false;
+
+		skyId = uint16(skylander.data[0x11]) << 8 | uint16(skylander.data[0x10]);
+		skyVar = uint16(skylander.data[0x1D]) << 8 | uint16(skylander.data[0x1C]);
+		return true;
 	}
 
 	bool SkylanderUSB::CreateSkylander(fs::path pathName, uint16 skyId, uint16 skyVar)
