@@ -5,7 +5,7 @@
 #pragma once
 
 // A TCP server on 127.0.0.1 that lets another program on this machine place figures
-// on the emulated Skylanders portal and Infinity Base, as the Emulated USB Devices window does.
+// on the emulated Skylanders portal, Infinity Base and Dimensions Toypad, as the Emulated USB Devices window does.
 // It is off unless <SkylandersIPC><enabled> is set in settings.xml.
 namespace nsyshid::SkylanderPortalIPC
 {

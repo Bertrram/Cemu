@@ -575,6 +575,8 @@ namespace nsyshid
 		case 0xC7: // Flash All
 		case 0xC8: // Color All
 		{
+			// kept for the portal server only; the game is answered as before
+			NoteLight(buf);
 			// Send a blank response to acknowledge color has been sent to toypad
 			q_result = {0x55, 0x01, sequence};
 			q_result[3] = GenerateChecksum(q_result, 3);
@@ -615,6 +617,103 @@ namespace nsyshid
 		}
 
 		m_queries.push(q_result);
+	}
+
+	// What a pad shows once the light it was asked for has run its course. A fade's steps go from the old colour to the
+	// new one and back in turn, so an odd count ends on the new colour and an even one on the old, and one that never
+	// stops is taken at its new colour. None of the sources below says what a flash leaves, so a flash is taken to leave
+	// the pad as it was, and so is a fade to colours the pad picks (Ellerbach/LegoDimensions 58d1f12,
+	// LegoDimensionsProtocol.md, read 4 November 2026)
+	static std::array<uint8, 3> SettledColor(const DimensionsUSB::PadLight& light)
+	{
+		using Mode = DimensionsUSB::PadLight::Mode;
+		switch (light.mode)
+		{
+		case Mode::Fade:
+			return (light.count == 0 || light.count % 2 == 1) ? light.color : light.from;
+		case Mode::Flash:
+		case Mode::Random:
+			return light.from;
+		default:
+			return light.color;
+		}
+	}
+
+	static void ChangeLight(DimensionsUSB::PadLight& light, DimensionsUSB::PadLight::Mode mode, std::array<uint8, 3> color,
+							uint8 time, uint8 off, uint8 count)
+	{
+		light.from = SettledColor(light);
+		light.mode = mode;
+		light.color = color;
+		light.time = time;
+		light.off = off;
+		light.count = count;
+		light.changes++;
+	}
+
+	static std::array<uint8, 3> ColorAt(std::span<const uint8, 32> buf, size_t at)
+	{
+		return {buf[at], buf[at + 1], buf[at + 2]};
+	}
+
+	// The light commands as the game sends them, from buf[4] on. A command for one pad names it first: 0 for all three,
+	// 1 for the centre, 2 the left and 3 the right one, and a pad above 3 changes none. A command for all three gives a
+	// block for each, the centre's first, then the left's and the right's, and a block that starts with 0 leaves its pad
+	// alone, as Fade All is written to do and Flash All and Color All are taken to (Ellerbach/LegoDimensions 58d1f12,
+	// LegoDimensionsProtocol.md; AlinaNova21/node-ld f54b177, src/lib/ToyPad.js; Berny23/LD-ToyPad-Emulator 32ccf72,
+	// index.js; read 4 November 2026)
+	void DimensionsUSB::NoteLight(std::span<const uint8, 32> buf)
+	{
+		using Mode = PadLight::Mode;
+		std::lock_guard lock(m_dimensionsMutex);
+
+		for (uint8 i = 0; i < m_lights.size(); i++)
+		{
+			PadLight& light = m_lights[i];
+			const bool forThisPad = buf[4] == 0 || buf[4] == i + 1;
+			switch (buf[2])
+			{
+			case 0xC0: // Color: pad, red, green, blue
+				if (forThisPad)
+					ChangeLight(light, Mode::Solid, ColorAt(buf, 5), 0, 0, 0);
+				break;
+			case 0xC2: // Fade: pad, tick time, tick count, red, green, blue
+				if (forThisPad)
+					ChangeLight(light, Mode::Fade, ColorAt(buf, 7), buf[5], 0, buf[6]);
+				break;
+			case 0xC3: // Flash: pad, ticks on, ticks off, tick count, red, green, blue
+				if (forThisPad)
+					ChangeLight(light, Mode::Flash, ColorAt(buf, 8), buf[5], buf[6], buf[7]);
+				break;
+			case 0xC4: // Fade Random: pad, tick time, tick count
+				if (forThisPad)
+					ChangeLight(light, Mode::Random, light.color, buf[5], 0, buf[6]);
+				break;
+			case 0xC6: // Fade All: on, tick time, tick count, red, green, blue
+			{
+				const size_t at = 4 + i * 6;
+				if (buf[at] != 0)
+					ChangeLight(light, Mode::Fade, ColorAt(buf, at + 3), buf[at + 1], 0, buf[at + 2]);
+				break;
+			}
+			case 0xC7: // Flash All: on, ticks on, ticks off, tick count, red, green, blue
+			{
+				const size_t at = 4 + i * 7;
+				if (buf[at] != 0)
+					ChangeLight(light, Mode::Flash, ColorAt(buf, at + 4), buf[at + 1], buf[at + 2], buf[at + 3]);
+				break;
+			}
+			case 0xC8: // Color All: on, red, green, blue
+			{
+				const size_t at = 4 + i * 4;
+				if (buf[at] != 0)
+					ChangeLight(light, Mode::Solid, ColorAt(buf, at + 1), 0, 0, 0);
+				break;
+			}
+			default: // Get Pad Color only asks
+				break;
+			}
+		}
 	}
 
 	uint32 DimensionsUSB::LoadFigure(const std::array<uint8, 0x2D * 0x04>& buf, std::unique_ptr<FileStream> file, uint8 pad, uint8 index)
@@ -1166,5 +1265,37 @@ namespace nsyshid
 			}
 		}
 		return fmt::format("Unknown ({})", figNum);
+	}
+
+	// The id is the one the game reads from the tag: a character's decrypted from page 36, a vehicle's or gadget's as
+	// page 36 holds it, and whatever the game last wrote there, so a Blank Tag the game built a vehicle on gives that vehicle
+	bool DimensionsUSB::GetLoadedFigure(uint8 index, uint32& id)
+	{
+		std::lock_guard lock(m_dimensionsMutex);
+		if (index >= m_figures.size() || m_figures[index].index == 255)
+			return false;
+
+		id = m_figures[index].id;
+		return true;
+	}
+
+	// The Toy Pad tells the game which tag came or went by its UID, the 7 bytes around the check byte at 3 (LoadFigure),
+	// so it can't hold one tag twice, and FileStream::openFile2 shares a tag's file for writing, so nothing else stops one
+	// file going on two places, where each would save its own copy of the game's writes over the other's
+	bool DimensionsUSB::HasFigureWithUid(const std::array<uint8, DIM_FIGURE_SIZE>& data)
+	{
+		std::lock_guard lock(m_dimensionsMutex);
+		for (const DimensionsMini& figure : m_figures)
+		{
+			if (figure.index != 255 && memcmp(figure.data.data(), data.data(), 3) == 0 && memcmp(&figure.data[4], &data[4], 4) == 0)
+				return true;
+		}
+		return false;
+	}
+
+	std::array<DimensionsUSB::PadLight, 3> DimensionsUSB::GetLights()
+	{
+		std::lock_guard lock(m_dimensionsMutex);
+		return m_lights;
 	}
 } // namespace nsyshid
