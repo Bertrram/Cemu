@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "SkylanderPortalIPC.h"
+#include "Infinity.h"
 #include "Skylander.h"
 
 #include "config/CemuConfig.h"
@@ -21,7 +22,8 @@
 
 // The protocol is the one RPCS3's Skylanders portal server speaks (rpcs3/Emu/Io/SkylanderPortalIPC.cpp,
 // added in RPCS3 commit dfc486f), so that a launcher drives both emulators the same way:
-// one line per connection, one reply, then the connection is closed. "hello", "create" and "hush" are Cemu's own.
+// one line per connection, one reply, then the connection is closed. "hello", "create" and "hush" are Cemu's own,
+// and so are the Infinity Base's commands, which all start with "infinity" so that none can be taken for the portal's.
 
 namespace nsyshid::SkylanderPortalIPC
 {
@@ -37,6 +39,9 @@ namespace nsyshid::SkylanderPortalIPC
 #endif
 
 	static std::atomic_bool s_inputHushed = false;
+	// the emulated devices the running title started with, as Start() read them from the settings
+	static std::atomic_bool s_portalEmulated = false;
+	static std::atomic_bool s_baseEmulated = false;
 
 	static bool WasInterrupted()
 	{
@@ -186,6 +191,184 @@ namespace nsyshid::SkylanderPortalIPC
 		return "ok\n";
 	}
 
+	struct Words
+	{
+		std::string_view first;
+		std::string_view rest;
+		bool hasRest = false;
+	};
+
+	// splits a line at its first space, as ProcessCommand does
+	static Words SplitFirstWord(std::string_view line)
+	{
+		const size_t space = line.find(' ');
+		if (space == std::string_view::npos)
+			return {line, {}, false};
+		return {line.substr(0, space), line.substr(space + 1), true};
+	}
+
+	// the places are numbered as the Emulated USB Devices window lists them, from 0 for the hexagon's play set or power disc
+	// to 8 for Player Two's second ability, which is the order InfinityUSB keeps them in. LoadFigure and RemoveFigure don't
+	// check a place themselves
+	static bool ParseInfinityPlace(std::string_view text, uint8& place)
+	{
+		sint64 value;
+		if (!ParseNumber(text, value) || value < 0 || value >= MAX_FIGURES)
+			return false;
+		place = (uint8)value;
+		return true;
+	}
+
+	static std::string HandleInfinityStatus()
+	{
+		std::string reply;
+		for (uint8 place = 0; place < MAX_FIGURES; place++)
+		{
+			// the series is the one the figure maker's list gives the number, 0 for a number it doesn't have
+			uint32 number;
+			if (g_infinitybase.GetLoadedFigure(place, number))
+				reply += fmt::format("place{} loaded {} {}\n", (uint32)place, number, (uint32)g_infinitybase.FindFigure(number).first);
+			else
+				reply += fmt::format("place{} empty\n", (uint32)place);
+		}
+		reply += "ok\n";
+		return reply;
+	}
+
+	static std::string HandleInfinityLoad(uint8 place, std::string_view path)
+	{
+		if (!IsAbsoluteLocalPath(path))
+			return "error path must be absolute\n";
+
+		// checked before the file is opened, so that a device or a pipe is never opened
+		const fs::path figurePath = _utf8ToPath(path);
+		std::error_code ec;
+		if (!fs::is_regular_file(figurePath, ec) || fs::file_size(figurePath, ec) != INF_FIGURE_SIZE)
+			return "error not an infinity file\n";
+
+		// opened for writing as the Emulated USB Devices window opens it, so the game can save to the figure
+		std::unique_ptr<FileStream> figureFile(FileStream::openFile2(figurePath, true));
+		if (!figureFile)
+			return "error cannot open file\n";
+
+		std::array<uint8, INF_FIGURE_SIZE> data;
+		if (figureFile->readData(data.data(), data.size()) != data.size())
+			return "error file too small\n";
+
+		if (g_infinitybase.HasFigureWithUid(data, place))
+			return "error already on the base\n";
+
+		// LoadFigure would drop what the place holds without saving it or telling the game, so that comes off first, as
+		// the window takes it off (EmulatedUSBDeviceFrame::LoadFigurePath), and only once the new file has been read
+		g_infinitybase.RemoveFigure(place);
+		const uint32 number = g_infinitybase.LoadFigure(data, std::move(figureFile), place);
+		return fmt::format("ok {} {}\n", number, (uint32)g_infinitybase.FindFigure(number).first);
+	}
+
+	static std::string HandleInfinityRemove(uint8 place)
+	{
+		if (!g_infinitybase.RemoveFigure(place))
+			return "error place empty\n";
+		return "ok\n";
+	}
+
+	static std::string HandleInfinityClear()
+	{
+		for (uint8 place = 0; place < MAX_FIGURES; place++)
+			g_infinitybase.RemoveFigure(place);
+		return "ok\n";
+	}
+
+	static std::string HandleInfinityCreate(uint32 number, uint8 series, std::string_view path)
+	{
+		if (!IsAbsoluteLocalPath(path))
+			return "error path must be absolute\n";
+
+		// the figure maker in the Emulated USB Devices window asks before it replaces a file, and nobody can be asked here
+		const fs::path figurePath = _utf8ToPath(path);
+		std::error_code ec;
+		if (fs::exists(fs::symlink_status(figurePath, ec)))
+			return "error file exists\n";
+
+		if (!g_infinitybase.CreateFigure(figurePath, number, series))
+			return "error cannot create file\n";
+
+		return "ok\n";
+	}
+
+	// every figure the figure maker knows, in the order of their numbers. The name comes last, so its spaces need no quoting
+	static std::string HandleInfinityList()
+	{
+		std::string reply;
+		for (const auto& [number, figure] : InfinityUSB::GetFigureList())
+			reply += fmt::format("figure {} {} {}\n", number, (uint32)figure.first, figure.second);
+		reply += "ok\n";
+		return reply;
+	}
+
+	// These make the calls the Emulated USB Devices window makes from the GUI thread, and ThreadFunc runs one at a time,
+	// so they are as safe beside the title's own reads and writes of the base as the window is
+	static std::string HandleInfinity(std::string_view line)
+	{
+		if (!s_baseEmulated)
+			return "error base not emulated\n";
+
+		const Words words = SplitFirstWord(line);
+		const std::string_view command = words.first;
+
+		if (command == "status")
+			return HandleInfinityStatus();
+
+		if (command == "list")
+			return HandleInfinityList();
+
+		if (command == "clear")
+			return HandleInfinityClear();
+
+		if (command == "remove")
+		{
+			if (!words.hasRest)
+				return "error missing place\n";
+			uint8 place;
+			if (!ParseInfinityPlace(words.rest, place))
+				return "error invalid place\n";
+			return HandleInfinityRemove(place);
+		}
+
+		if (command == "load")
+		{
+			if (!words.hasRest)
+				return "error missing arguments\n";
+			const Words placeAndPath = SplitFirstWord(words.rest);
+			if (!placeAndPath.hasRest)
+				return "error missing path\n";
+			uint8 place;
+			if (!ParseInfinityPlace(placeAndPath.first, place))
+				return "error invalid place\n";
+			return HandleInfinityLoad(place, placeAndPath.rest);
+		}
+
+		if (command == "create")
+		{
+			if (!words.hasRest)
+				return "error missing arguments\n";
+			const Words numberAndRest = SplitFirstWord(words.rest);
+			const Words seriesAndPath = SplitFirstWord(numberAndRest.rest);
+			if (!numberAndRest.hasRest || !seriesAndPath.hasRest)
+				return "error missing path\n";
+			// CreateFigure turns down a number below 0x10000 only after it has made the file, which it leaves empty and open
+			sint64 number, series;
+			if (!ParseNumber(numberAndRest.first, number) || number < 0x10000 || number > 0xFFFFFF)
+				return "error invalid number\n";
+			// the series dates the figure, and only 1, 2 and 3 have a date (GenerateBlankFigureData)
+			if (!ParseNumber(seriesAndPath.first, series) || series < 1 || series > 3)
+				return "error invalid series\n";
+			return HandleInfinityCreate((uint32)number, (uint8)series, seriesAndPath.rest);
+		}
+
+		return "error unknown command\n";
+	}
+
 	static std::string ProcessCommand(std::string_view line)
 	{
 		const size_t firstSpace = line.find(' ');
@@ -195,6 +378,11 @@ namespace nsyshid::SkylanderPortalIPC
 
 		if (command == "hello")
 			return "ok cemu-portal 1\n";
+
+		// the server also runs for a title with only the Infinity Base or the Dimensions Toypad, which can't see the portal
+		const bool forThePortal = command == "status" || command == "clear" || command == "remove" || command == "load" || command == "create";
+		if (forThePortal && !s_portalEmulated)
+			return "error portal not emulated\n";
 
 		if (command == "status")
 			return HandleStatus();
@@ -247,6 +435,9 @@ namespace nsyshid::SkylanderPortalIPC
 				return "error missing argument\n";
 			return HandleHush(arguments);
 		}
+
+		if (command == "infinity")
+			return HandleInfinity(arguments);
 
 		return "error unknown command\n";
 	}
@@ -423,8 +614,16 @@ namespace nsyshid::SkylanderPortalIPC
 		if (s_server)
 			return;
 		const auto& config = GetConfig();
-		if (!config.skylanders_ipc.enabled || !config.emulated_usb_devices.emulate_skylander_portal)
+		// nsyshid attaches the emulated devices from these settings as the title starts, right before this, and not again until
+		// the next title (BackendEmulated::AttachVisibleDevices). The server runs for any of them: hush serves every title
+		// with one, and a client tells a build without a device's commands by its "error unknown command"
+		const bool portal = config.emulated_usb_devices.emulate_skylander_portal.GetValue();
+		const bool base = config.emulated_usb_devices.emulate_infinity_base.GetValue();
+		const bool toypad = config.emulated_usb_devices.emulate_dimensions_toypad.GetValue();
+		if (!config.skylanders_ipc.enabled || !(portal || base || toypad))
 			return;
+		s_portalEmulated = portal;
+		s_baseEmulated = base;
 		const uint16 port = config.skylanders_ipc.port.GetValue();
 
 #if BOOST_OS_WINDOWS

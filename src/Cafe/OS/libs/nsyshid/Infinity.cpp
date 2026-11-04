@@ -860,22 +860,7 @@ namespace nsyshid
 		std::lock_guard lock(m_infinityMutex);
 		uint8 orderAdded;
 
-		std::vector<uint8> sha1Calc = {SHA1_CONSTANT.begin(), SHA1_CONSTANT.end() - 1};
-		for (int i = 0; i < 7; i++)
-		{
-			sha1Calc.push_back(buf[i]);
-		}
-
-		std::array<uint8, 16> key = GenerateInfinityFigureKey(sha1Calc);
-
-		std::array<uint8, 16> infinity_decrypted_block = {};
-		std::array<uint8, 16> encryptedBlock = {};
-		memcpy(encryptedBlock.data(), &buf[16], 16);
-
-		AES128_ECB_decrypt(encryptedBlock.data(), key.data(), infinity_decrypted_block.data());
-
-		uint32 number = uint32(infinity_decrypted_block[1]) << 16 | uint32(infinity_decrypted_block[2]) << 8 |
-						uint32(infinity_decrypted_block[3]);
+		uint32 number = FigureNumber(buf);
 
 		InfinityFigure& figure = m_figures[position];
 
@@ -900,6 +885,51 @@ namespace nsyshid
 		m_figureAddedRemovedResponses.push(figureChangeResponse);
 
 		return number;
+	}
+
+	bool InfinityUSB::GetLoadedFigure(uint8 position, uint32& number)
+	{
+		std::lock_guard lock(m_infinityMutex);
+		if (position >= m_figures.size() || !m_figures[position].present)
+			return false;
+
+		number = FigureNumber(m_figures[position].data);
+		return true;
+	}
+
+	// The base tells figures apart by their UID, the first 7 bytes (GetFigureIdentifier), so it can't hold one figure
+	// twice, and FileStream::openFile2 shares a figure file for writing, so nothing else stops one file going on two
+	// places, where each would save its own copy of the game's writes over the other's
+	bool InfinityUSB::HasFigureWithUid(const std::array<uint8, INF_FIGURE_SIZE>& data, uint8 exceptPosition)
+	{
+		std::lock_guard lock(m_infinityMutex);
+		for (uint8 i = 0; i < m_figures.size(); i++)
+		{
+			if (i != exceptPosition && m_figures[i].present && memcmp(m_figures[i].data.data(), data.data(), 7) == 0)
+				return true;
+		}
+		return false;
+	}
+
+	// The number is in block 1, encrypted with a key made from the UID
+	uint32 InfinityUSB::FigureNumber(const std::array<uint8, INF_FIGURE_SIZE>& data)
+	{
+		std::vector<uint8> sha1Calc = {SHA1_CONSTANT.begin(), SHA1_CONSTANT.end() - 1};
+		for (int i = 0; i < 7; i++)
+		{
+			sha1Calc.push_back(data[i]);
+		}
+
+		std::array<uint8, 16> key = GenerateInfinityFigureKey(sha1Calc);
+
+		std::array<uint8, 16> infinity_decrypted_block = {};
+		std::array<uint8, 16> encryptedBlock = {};
+		memcpy(encryptedBlock.data(), &data[16], 16);
+
+		AES128_ECB_decrypt(encryptedBlock.data(), key.data(), infinity_decrypted_block.data());
+
+		return uint32(infinity_decrypted_block[1]) << 16 | uint32(infinity_decrypted_block[2]) << 8 |
+			   uint32(infinity_decrypted_block[3]);
 	}
 
 	static uint32 InfinityCRC32(const std::array<uint8, 16>& buffer)
