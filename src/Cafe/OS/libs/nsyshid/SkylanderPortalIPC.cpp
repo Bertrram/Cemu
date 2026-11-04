@@ -453,12 +453,6 @@ namespace nsyshid::SkylanderPortalIPC
 		if (!fs::is_regular_file(tagPath, ec) || fs::file_size(tagPath, ec) != DIM_FIGURE_SIZE)
 			return "error not a toypad file\n";
 
-		// LoadFigure would drop what the place holds without saving it or telling the game. The window takes it off first
-		// (EmulatedUSBDeviceFrame::LoadMinifigPath), and here the client does, so that it knows what came off
-		uint32 held;
-		if (g_dimensionstoypad.GetLoadedFigure(place, held))
-			return "error place taken\n";
-
 		// opened for writing as the Emulated USB Devices window opens it, so the game can write a vehicle to a Blank Tag
 		std::unique_ptr<FileStream> tagFile(FileStream::openFile2(tagPath, true));
 		if (!tagFile)
@@ -470,6 +464,14 @@ namespace nsyshid::SkylanderPortalIPC
 
 		if (g_dimensionstoypad.HasFigureWithUid(data))
 			return "error already on the toy pad\n";
+
+		// LoadFigure would drop what the place holds without saving it or telling the game. The window takes it off first
+		// (EmulatedUSBDeviceFrame::LoadMinifigPath), and here the client does, so that it knows what came off. Checked
+		// last, once the new tag has been read: the client takes the old tag off only on this answer, so a tag that could
+		// never go on never costs the place the tag it holds
+		uint32 held;
+		if (g_dimensionstoypad.GetLoadedFigure(place, held))
+			return "error place taken\n";
 
 		const uint32 id = g_dimensionstoypad.LoadFigure(data, std::move(tagFile), ToypadPadOf(place), place);
 		return fmt::format("ok {}\n", id);
