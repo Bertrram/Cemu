@@ -78,6 +78,9 @@ namespace nsyshid
 		bool CreateFigure(fs::path pathName, uint32 figureNum, uint8 series);
 		static std::map<const uint32, const std::pair<const uint8, const char*>> GetFigureList();
 		std::pair<uint8, std::string> FindFigure(uint32 figNum);
+		// for the portal server (SkylanderPortalIPC.cpp), which has no window to keep its own record of the places
+		bool GetLoadedFigure(uint8 position, uint32& number);
+		bool HasFigureWithUid(const std::array<uint8, INF_FIGURE_SIZE>& data, uint8 exceptPosition);
 
 	  protected:
 		std::shared_mutex m_infinityMutex;
@@ -94,6 +97,7 @@ namespace nsyshid
 		uint8 DeriveFigurePosition(uint8 position);
 		std::array<uint8, 16> GenerateInfinityFigureKey(const std::vector<uint8>& sha1Data);
 		std::array<uint8, 16> GenerateBlankFigureData(uint32 figureNum, uint8 series);
+		uint32 FigureNumber(const std::array<uint8, INF_FIGURE_SIZE>& data);
 
 		uint32 m_randomA;
 		uint32 m_randomB;
